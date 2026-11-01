@@ -275,7 +275,7 @@ switch ($action) {
         $pass = $input['password'] ?? '';
 
         if ($name === '') {
-            echo json_encode(['error' => 'Escribe tu usuario/apodo para entrar']);
+            echo json_encode(['error' => 'Escribe tu nombre para entrar']);
             exit;
         }
         if ($asHost) {

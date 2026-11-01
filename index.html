@@ -611,8 +611,8 @@
             <button class="avatar-next" onclick="nextAvatar()" title="Cambiar personaje">↻</button>
           </div>
 
-          <label id="labelName" class="field-label">ELIGE UN PERSONAJE Y UN APODO</label>
-          <input id="inputName" class="input-box" type="text" maxlength="18" placeholder="TuApodo" />
+          <label id="labelName" class="field-label">ELIGE UN PERSONAJE Y ESCRIBE TU NOMBRE</label>
+          <input id="inputName" class="input-box" type="text" maxlength="18" placeholder="Tu Nombre" />
 
           <div id="hostPassWrap" class="hidden">
             <label class="field-label">CONTRASEÑA DEL HOST</label>
@@ -811,8 +811,8 @@
       document.getElementById('tabGuest').classList.toggle('active', !isHost);
       document.getElementById('tabHost').classList.toggle('active', isHost);
       document.getElementById('hostPassWrap').classList.toggle('hidden', !isHost);
-      document.getElementById('labelName').textContent = isHost ? 'USUARIO HOST' : 'ELIGE UN PERSONAJE Y UN APODO';
-      document.getElementById('inputName').placeholder = isHost ? 'irvin' : 'TuApodo';
+      document.getElementById('labelName').textContent = isHost ? 'USUARIO HOST' : 'ELIGE UN PERSONAJE Y ESCRIBE TU NOMBRE';
+      document.getElementById('inputName').placeholder = isHost ? 'irvin' : 'Tu Nombre';
     }
 
     function toggleTvMode() {
@@ -855,7 +855,7 @@
     async function joinGame() {
       const name = document.getElementById('inputName').value.trim();
       const password = document.getElementById('inputPass').value;
-      if (!name) return showToast('Escribe tu apodo primero');
+      if (!name) return showToast('Escribe tu nombre primero');
 
       const data = await apiCall('join', {
         name,
