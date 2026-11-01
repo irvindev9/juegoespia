@@ -785,12 +785,12 @@
 
     let avatarIdx = Math.floor(Math.random() * AVATARS.length);
     let loginAsHost = false;
-    let playerId = localStorage.getItem('espia_player_id') || '';
-    let tvMode = localStorage.getItem('espia_tv_mode') === '1';
+    let playerId = sessionStorage.getItem('espia_player_id') || '';
+    let tvMode = sessionStorage.getItem('espia_tv_mode') === '1';
     let lastState = null;
 
     document.getElementById('avatarPreview').textContent = AVATARS[avatarIdx];
-    const savedName = localStorage.getItem('espia_player_name') || '';
+    const savedName = sessionStorage.getItem('espia_player_name') || '';
     if (savedName) document.getElementById('inputName').value = savedName;
 
     function showToast(msg) {
@@ -817,12 +817,13 @@
 
     function toggleTvMode() {
       tvMode = !tvMode;
-      localStorage.setItem('espia_tv_mode', tvMode ? '1' : '0');
+      sessionStorage.setItem('espia_tv_mode', tvMode ? '1' : '0');
       if (lastState) renderState(lastState);
     }
 
     function logoutPlayer() {
-      localStorage.removeItem('espia_player_id');
+      sessionStorage.removeItem('espia_player_id');
+      sessionStorage.removeItem('espia_player_name');
       playerId = '';
       lastState = null;
       document.getElementById('topBar').classList.add('hidden');
@@ -866,8 +867,8 @@
 
       if (data && data.me) {
         playerId = data.me.id;
-        localStorage.setItem('espia_player_id', playerId);
-        localStorage.setItem('espia_player_name', name);
+        sessionStorage.setItem('espia_player_id', playerId);
+        sessionStorage.setItem('espia_player_name', name);
         renderState(data);
       }
     }

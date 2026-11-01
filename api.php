@@ -292,8 +292,24 @@ switch ($action) {
         $id = $input['player_id'] ?? '';
         if ($asHost) {
             $id = 'host_irvin';
-        } elseif ($id === '' || $id === 'host_irvin') {
-            $id = bin2hex(random_bytes(8));
+        } else {
+            // Para invitados: buscar si ya existe un invitado con ese mismo nombre, o si no crear un ID único nuevo
+            $stCheck = $db->prepare("SELECT id FROM players WHERE lower(name) = lower(?) AND is_host = 0 LIMIT 1");
+            $stCheck->execute([$name]);
+            $existingGuestId = $stCheck->fetchColumn();
+            if ($existingGuestId) {
+                $id = $existingGuestId;
+            } elseif ($id === '' || $id === 'host_irvin') {
+                $id = bin2hex(random_bytes(8));
+            } else {
+                // Si traía un ID en sesión pero con otro nombre distinto, generar nuevo ID para no sobrescribir al jugador anterior
+                $stOld = $db->prepare("SELECT name FROM players WHERE id = ?");
+                $stOld->execute([$id]);
+                $oldName = $stOld->fetchColumn();
+                if ($oldName !== false && strtolower($oldName) !== strtolower($name)) {
+                    $id = bin2hex(random_bytes(8));
+                }
+            }
         }
 
         $stmt = $db->prepare("
