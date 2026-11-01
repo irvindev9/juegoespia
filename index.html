@@ -659,11 +659,11 @@
             </div>
             <div>
               <label class="field-label">1er TURNO (SEG)</label>
-              <input id="cfgFirstSec" class="input-box" type="number" min="3" max="120" value="15" onchange="saveSettings()" />
+              <input id="cfgFirstSec" class="input-box" type="number" min="3" max="120" value="20" onchange="saveSettings()" />
             </div>
             <div>
               <label class="field-label">SIG. TURNOS (SEG)</label>
-              <input id="cfgTurnSec" class="input-box" type="number" min="2" max="120" value="5" onchange="saveSettings()" />
+              <input id="cfgTurnSec" class="input-box" type="number" min="2" max="120" value="10" onchange="saveSettings()" />
             </div>
           </div>
 
@@ -880,8 +880,8 @@
     async function saveSettings() {
       await apiCall('save_settings', {
         max_rounds: parseInt(document.getElementById('cfgMaxRounds').value, 10) || 3,
-        first_turn_sec: parseInt(document.getElementById('cfgFirstSec').value, 10) || 15,
-        turn_sec: parseInt(document.getElementById('cfgTurnSec').value, 10) || 5
+        first_turn_sec: parseInt(document.getElementById('cfgFirstSec').value, 10) || 20,
+        turn_sec: parseInt(document.getElementById('cfgTurnSec').value, 10) || 10
       });
       showToast('✅ Ajustes guardados');
     }

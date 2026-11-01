@@ -40,8 +40,8 @@ $defaults = [
     'host_user' => 'irvin',
     'host_pass' => 'admin1.',
     'max_rounds' => '3',
-    'first_turn_sec' => '15',
-    'turn_sec' => '5',
+    'first_turn_sec' => '20',
+    'turn_sec' => '10',
     'status' => 'lobby', // lobby | questioning | voting | round_result | game_over
     'current_round' => '1',
     'current_place' => '',
@@ -131,7 +131,7 @@ if ($cfg['status'] === 'questioning') {
                 'turn_ends_at' => '0'
             ]);
         } else {
-            $sec = (int)$cfg['current_round'] === 1 ? (int)$cfg['first_turn_sec'] : (int)$cfg['turn_sec'];
+            $sec = (int)$cfg['turn_sec'];
             setConfig($db, [
                 'turn_index' => (string)$nextIndex,
                 'turn_ends_at' => (string)($now + $sec)
@@ -144,7 +144,8 @@ if ($cfg['status'] === 'questioning') {
 function startQuestionRound(PDO $db, int $roundNum, array $cfg): void {
     $players = $db->query("SELECT id FROM players ORDER BY rowid ASC")->fetchAll(PDO::FETCH_COLUMN);
     shuffle($players);
-    $sec = $roundNum === 1 ? (int)$cfg['first_turn_sec'] : (int)$cfg['turn_sec'];
+    // El primer jugador en preguntar en cada ronda tiene first_turn_sec (por defecto 20s)
+    $sec = (int)$cfg['first_turn_sec'];
     $db->exec("DELETE FROM votes");
     setConfig($db, [
         'status' => 'questioning',
@@ -385,7 +386,7 @@ switch ($action) {
                 $db->exec("DELETE FROM votes");
                 setConfig($db, ['status' => 'voting', 'turn_index' => '0', 'turn_ends_at' => '0']);
             } else {
-                $sec = (int)$cfg['current_round'] === 1 ? (int)$cfg['first_turn_sec'] : (int)$cfg['turn_sec'];
+                $sec = (int)$cfg['turn_sec'];
                 setConfig($db, [
                     'turn_index' => (string)$nextIndex,
                     'turn_ends_at' => (string)($now + $sec)
@@ -454,8 +455,8 @@ switch ($action) {
     case 'save_settings':
         if (!$isHost) { echo json_encode(['error' => 'No autorizado']); exit; }
         $maxR = max(1, min(10, (int)($input['max_rounds'] ?? 3)));
-        $firstSec = max(3, min(120, (int)($input['first_turn_sec'] ?? 15)));
-        $turnSec = max(2, min(120, (int)($input['turn_sec'] ?? 5)));
+        $firstSec = max(3, min(120, (int)($input['first_turn_sec'] ?? 20)));
+        $turnSec = max(2, min(120, (int)($input['turn_sec'] ?? 10)));
         $updates = [
             'max_rounds' => (string)$maxR,
             'first_turn_sec' => (string)$firstSec,
