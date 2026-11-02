@@ -20,7 +20,8 @@ CREATE TABLE IF NOT EXISTS players (
     avatar INT DEFAULT 0,
     is_host INT DEFAULT 0,
     last_seen INT DEFAULT 0,
-    eliminated INT DEFAULT 0
+    eliminated INT DEFAULT 0,
+    score REAL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS places (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -34,6 +35,9 @@ CREATE TABLE IF NOT EXISTS votes (
     target_id TEXT NOT NULL
 );
 ");
+try {
+    $db->exec("ALTER TABLE players ADD COLUMN score REAL DEFAULT 0");
+} catch (Exception $e) {}
 
 // Configuración e inicialización por defecto
 $defaults = [
@@ -157,15 +161,17 @@ function startQuestionRound(PDO $db, int $roundNum, array $cfg): void {
 }
 
 function evaluateVotes(PDO $db, array $cfg): void {
-    $players = $db->query("SELECT * FROM players")->fetchAll();
+    $players = $db->query("SELECT * FROM players ORDER BY rowid ASC")->fetchAll();
     $totalPlayers = count($players);
     // Mayoría = al menos 1/3 de los jugadores redondeando hacia arriba
     $threshold = max(1, (int)ceil($totalPlayers / 3));
 
     $votes = $db->query("SELECT voter_id, target_id FROM votes")->fetchAll();
     $counts = [];
+    $voterTarget = [];
     foreach ($votes as $v) {
         $t = $v['target_id'];
+        $voterTarget[$v['voter_id']] = $t;
         if ($t === 'pass') continue;
         $counts[$t] = ($counts[$t] ?? 0) + 1;
     }
@@ -177,50 +183,95 @@ function evaluateVotes(PDO $db, array $cfg): void {
     $currentRound = (int)$cfg['current_round'];
     $maxRounds = (int)$cfg['max_rounds'];
     $spyId = $cfg['spy_id'];
+    $spyCaught = ($topTargetId && $topVotes >= $threshold && $topTargetId === $spyId);
+
+    // Actualizar puntuaciones de la ronda
+    // Espía: +1 punto por cada ronda que pasa sin ser descubierto
+    // Resto: empiezan con max_rounds puntos; -0 si votan al espía, -0.5 por pasar, -1 por equivocarse
+    $updScore = $db->prepare("UPDATE players SET score = ? WHERE id = ?");
+    foreach ($players as &$p) {
+        $sc = (float)($p['score'] ?? 0);
+        if ($p['id'] === $spyId) {
+            if (!$spyCaught) {
+                $sc += 1.0;
+            }
+        } else {
+            $t = $voterTarget[$p['id']] ?? 'pass';
+            if ($t === $spyId) {
+                // Adivinó al espía: no resta puntos
+            } elseif ($t === 'pass') {
+                $sc -= 0.5;
+            } else {
+                $sc -= 1.0;
+            }
+        }
+        $p['score'] = $sc;
+        $updScore->execute([$sc, $p['id']]);
+    }
+    unset($p);
 
     $playersById = [];
     foreach ($players as $p) $playersById[$p['id']] = $p;
     $spyName = $playersById[$spyId]['name'] ?? 'Espía';
 
+    $buildGameOverData = function(string $reasonTitle, string $reasonMsg) use ($players, $spyId, $spyName, $cfg, $threshold, $counts): array {
+        $scores = array_map(fn($pl) => (float)$pl['score'], $players);
+        $minScore = count($scores) > 0 ? min($scores) : 0.0;
+        $losers = [];
+        $scoreboard = [];
+        foreach ($players as $pl) {
+            $sc = (float)$pl['score'];
+            $isLoser = abs($sc - $minScore) < 0.001;
+            $item = [
+                'id' => $pl['id'],
+                'name' => $pl['name'],
+                'avatar' => (int)$pl['avatar'],
+                'score' => $sc,
+                'is_spy' => ($pl['id'] === $spyId),
+                'is_loser' => $isLoser
+            ];
+            $scoreboard[] = $item;
+            if ($isLoser) $losers[] = $item;
+        }
+        usort($scoreboard, fn($a, $b) => $a['score'] <=> $b['score']);
+        return [
+            'title' => $reasonTitle,
+            'message' => $reasonMsg,
+            'spy_id' => $spyId,
+            'spy_name' => $spyName,
+            'place' => $cfg['current_place'],
+            'threshold' => $threshold,
+            'votes' => $counts,
+            'min_score' => $minScore,
+            'losers' => $losers,
+            'scoreboard' => $scoreboard
+        ];
+    };
+
     // Si alguien alcanza al menos 1/3 de los votos, se revela su rol
     if ($topTargetId && $topVotes >= $threshold) {
         $accusedName = $playersById[$topTargetId]['name'] ?? 'Jugador';
-        if ($topTargetId === $spyId) {
-            // ¡Descubrieron al espía! Se termina la partida
+        if ($spyCaught) {
             setConfig($db, [
                 'status' => 'game_over',
-                'last_event' => json_encode([
-                    'winner' => 'players',
-                    'title' => '¡ESPÍA DESCUBIERTO!',
-                    'message' => "¡{$accusedName} recibió {$topVotes} votos (mínimo {$threshold}) y ERA EL ESPÍA! El lugar secreto era: {$cfg['current_place']}.",
-                    'spy_id' => $spyId,
-                    'spy_name' => $spyName,
-                    'place' => $cfg['current_place'],
-                    'threshold' => $threshold,
-                    'votes' => $counts
-                ])
+                'last_event' => json_encode($buildGameOverData(
+                    '¡ESPÍA DESCUBIERTO!',
+                    "¡{$accusedName} recibió {$topVotes} votos (mínimo {$threshold}) y ERA EL ESPÍA! El lugar secreto era: {$cfg['current_place']}."
+                ))
             ]);
             return;
         } else {
             // Se revela que NO es el espía
             $db->prepare("UPDATE players SET eliminated = 1 WHERE id = ?")->execute([$topTargetId]);
             if ($currentRound >= $maxRounds) {
-                // En la última ronda es todo o nada: si acusan a un inocente, gana el espía
                 setConfig($db, [
                     'status' => 'game_over',
-                    'last_event' => json_encode([
-                        'winner' => 'spy',
-                        'title' => '¡EL ESPÍA GANÓ!',
-                        'message' => "Acusaron a {$accusedName} ({$topVotes} votos), pero NO ERA EL ESPÍA. Se acabaron las {$maxRounds} rondas y {$spyName} logró pasar desapercibido.",
-                        'spy_id' => $spyId,
-                        'spy_name' => $spyName,
-                        'place' => $cfg['current_place'],
-                        'threshold' => $threshold,
-                        'votes' => $counts
-                    ])
+                    'last_event' => json_encode($buildGameOverData(
+                        '¡FIN DE LA PARTIDA!',
+                        "Acusaron a {$accusedName} ({$topVotes} votos), pero NO ERA EL ESPÍA. Se completaron las {$maxRounds} rondas y el espía era {$spyName}. Lugar: {$cfg['current_place']}."
+                    ))
                 ]);
             } else {
-                // Rondas 1 y 2: se revela que es inocente y continúa a la siguiente ronda
                 setConfig($db, [
                     'status' => 'round_result',
                     'last_event' => json_encode([
@@ -243,16 +294,10 @@ function evaluateVotes(PDO $db, array $cfg): void {
     if ($currentRound >= $maxRounds) {
         setConfig($db, [
             'status' => 'game_over',
-            'last_event' => json_encode([
-                'winner' => 'spy',
-                'title' => '¡EL ESPÍA LOGRO ESCAPAR!',
-                'message' => "No descubrieron al espía en las {$maxRounds} rondas. ¡{$spyName} pasó desapercibido! El lugar era: {$cfg['current_place']}.",
-                'spy_id' => $spyId,
-                'spy_name' => $spyName,
-                'place' => $cfg['current_place'],
-                'threshold' => $threshold,
-                'votes' => $counts
-            ])
+            'last_event' => json_encode($buildGameOverData(
+                '¡FIN DE LA PARTIDA!',
+                "No revelaron al espía en las {$maxRounds} rondas. El espía era {$spyName} y el lugar era: {$cfg['current_place']}."
+            ))
         ]);
     } else {
         setConfig($db, [
@@ -313,16 +358,17 @@ switch ($action) {
             }
         }
 
+        $initialScore = (float)($cfg['max_rounds'] ?? 3);
         $stmt = $db->prepare("
-            INSERT INTO players (id, name, avatar, is_host, last_seen, eliminated)
-            VALUES (?, ?, ?, ?, ?, 0)
+            INSERT INTO players (id, name, avatar, is_host, last_seen, eliminated, score)
+            VALUES (?, ?, ?, ?, ?, 0, ?)
             ON CONFLICT(id) DO UPDATE SET
                 name = excluded.name,
                 avatar = excluded.avatar,
                 is_host = CASE WHEN excluded.is_host = 1 THEN 1 ELSE players.is_host END,
                 last_seen = excluded.last_seen
         ");
-        $stmt->execute([$id, $name, $avatar, $asHost ? 1 : 0, $now]);
+        $stmt->execute([$id, $name, $avatar, $asHost ? 1 : 0, $now, $initialScore]);
         $playerId = $id;
         $st = $db->prepare("SELECT * FROM players WHERE id = ?");
         $st->execute([$playerId]);
@@ -366,6 +412,8 @@ switch ($action) {
         $db->prepare("INSERT OR IGNORE INTO used_places (place_id) VALUES (?)")->execute([$picked['id']]);
 
         $spyId = $players[array_rand($players)];
+        $maxRoundsScore = (float)($cfg['max_rounds'] ?? 3);
+        $db->prepare("UPDATE players SET score = CASE WHEN id = ? THEN 0 ELSE ? END")->execute([$spyId, $maxRoundsScore]);
 
         setConfig($db, [
             'current_place' => $picked['name'],
@@ -502,6 +550,9 @@ switch ($action) {
 }
 
 $players = $db->query("SELECT id, name, avatar, is_host, last_seen, eliminated FROM players ORDER BY rowid ASC")->fetchAll();
+if ($me && $cfg['status'] !== 'game_over') {
+    unset($me['score']);
+}
 $votesRows = $db->query("SELECT voter_id, target_id FROM votes")->fetchAll();
 $votedIds = array_column($votesRows, 'voter_id');
 $votesMap = [];
