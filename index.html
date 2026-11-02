@@ -533,8 +533,31 @@
     }
 
     .place-chip.used {
-      opacity: 0.5;
-      text-decoration: line-through;
+      opacity: 0.78;
+      background: rgba(255, 59, 48, 0.25);
+      border-color: rgba(255, 180, 162, 0.6);
+    }
+
+    .place-chip .used-badge {
+      background: #ff3b30;
+      color: #fff;
+      font-size: 0.68rem;
+      padding: 1px 6px;
+      border-radius: 99px;
+      cursor: pointer;
+    }
+
+    .voter-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      background: rgba(0, 0, 0, 0.45);
+      border: 1px solid rgba(255, 230, 0, 0.6);
+      color: var(--yellow-main);
+      font-size: 0.72rem;
+      font-weight: 800;
+      padding: 2px 7px;
+      border-radius: 99px;
     }
 
     .place-chip button {
@@ -669,9 +692,9 @@
 
           <!-- GESTIÓN DE LUGARES -->
           <div style="margin-top:8px;">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
-              <span class="field-label" style="margin:0;">📍 BASE DE LUGARES (<span id="placesCount">0</span>)</span>
-              <button class="btn secondary small" onclick="hostAction('reset_used_places')">🔄 Reiniciar Usados</button>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; flex-wrap:wrap; gap:6px;">
+              <span class="field-label" style="margin:0;">📍 BASE DE LUGARES (<span id="placesCount">0</span>) — <span id="usedPlacesCount">0</span> jugados</span>
+              <button class="btn secondary small" onclick="resetUsedPlaces()">🔄 Habilitar Todos (Resetear Jugados)</button>
             </div>
             <div style="display:flex; gap:8px;">
               <input id="inputNewPlace" class="input-box" style="margin:0; text-align:left;" type="text" placeholder="Nuevo lugar (ej. Submarino)..." onkeydown="if(event.key==='Enter') addPlace()" />
@@ -730,6 +753,7 @@
 
       <div id="passVoteWrap" style="margin-top:14px;">
         <button id="btnPassVote" class="btn secondary" onclick="castVote('pass')">⏭ PASAR TURNO (AÚN NO ESTOY SEGURO)</button>
+        <div id="passVotersList" style="display:flex; flex-wrap:wrap; gap:6px; justify-content:center; margin-top:8px;"></div>
       </div>
 
       <div id="hostVoteControls" class="hidden" style="margin-top:12px; text-align:center;">
@@ -877,6 +901,11 @@
       await apiCall(action, extra);
     }
 
+    async function resetUsedPlaces() {
+      await apiCall('reset_used_places');
+      showToast('✅ Todos los lugares están disponibles de nuevo');
+    }
+
     async function saveSettings() {
       await apiCall('save_settings', {
         max_rounds: parseInt(document.getElementById('cfgMaxRounds').value, 10) || 3,
@@ -969,13 +998,19 @@
           }
 
           if (Array.isArray(st.places)) {
+            const usedCount = st.places.filter(pl => Number(pl.used) === 1).length;
             document.getElementById('placesCount').textContent = st.places.length;
-            document.getElementById('placesList').innerHTML = st.places.map(pl => `
-              <span class="place-chip ${Number(pl.used) === 1 ? 'used' : ''}" title="${Number(pl.used) === 1 ? 'Ya jugado en esta sesión' : 'Disponible'}">
-                ${escapeHtml(pl.name)}
-                <button onclick="hostAction('delete_place',{place_id:${pl.id}})">×</button>
-              </span>
-            `).join('');
+            document.getElementById('usedPlacesCount').textContent = usedCount;
+            document.getElementById('placesList').innerHTML = st.places.map(pl => {
+              const isUsed = Number(pl.used) === 1;
+              return `
+                <span class="place-chip ${isUsed ? 'used' : ''}" title="${isUsed ? 'Toca ↺ para volver a habilitar este lugar' : 'Disponible'}">
+                  <span style="${isUsed ? 'text-decoration:line-through;' : ''}">${escapeHtml(pl.name)}</span>
+                  ${isUsed ? `<span class="used-badge" onclick="hostAction('toggle_used_place',{place_id:${pl.id}})" title="Rehabilitar lugar">↺ Usar</span>` : ''}
+                  <button onclick="hostAction('delete_place',{place_id:${pl.id}})" title="Eliminar de la base de datos">×</button>
+                </span>
+              `;
+            }).join('');
           }
         }
         return;
@@ -1069,24 +1104,47 @@
 
       if (isVoting) {
         const votedCount = (st.voted_player_ids || []).length;
+        const votesMap = st.votes_map || {};
         document.getElementById('voteSubtitle').textContent =
           `Se necesitan al menos ${st.majority_threshold} votos (1/3 de la sala) sobre un jugador para revelar su identidad. Han votado: ${votedCount}/${st.players.length}`;
+
+        // Agrupar quiénes están votando por cada quién en tiempo real
+        const votersByTarget = {};
+        Object.entries(votesMap).forEach(([voterId, targetId]) => {
+          if (!votersByTarget[targetId]) votersByTarget[targetId] = [];
+          if (pMap[voterId]) votersByTarget[targetId].push(pMap[voterId]);
+        });
 
         const voteGrid = document.getElementById('voteGrid');
         voteGrid.innerHTML = st.players.map(p => {
           const isSelected = st.my_vote === p.id;
-          const hasVoted = (st.voted_player_ids || []).includes(p.id);
+          const myTargetId = votesMap[p.id];
+          const myTargetName = myTargetId === 'pass' ? 'Pasó turno' : (pMap[myTargetId] ? `Votó a ${pMap[myTargetId].name}` : '');
           const wasRevealedInnocent = Number(p.eliminated) === 1;
+          const votersForThisPlayer = votersByTarget[p.id] || [];
+
           return `
             <div class="vote-card ${isSelected ? 'selected' : ''} ${wasRevealedInnocent ? 'eliminated' : ''}"
                  onclick="castVote('${p.id}')">
               <div class="mini-avatar" style="margin:0 auto 6px; width:48px; height:48px; font-size:1.6rem;">
                 ${AVATARS[(p.avatar || 0) % AVATARS.length]}
               </div>
-              <div style="font-weight:900; font-size:0.98rem;">${escapeHtml(p.name)}</div>
-              <div style="font-size:0.75rem; color:var(--yellow-soft); margin-top:4px;">
-                ${wasRevealedInnocent ? '✅ Inocente revelado' : (hasVoted ? '🗳️ Ya votó' : '⏳ Pensando...')}
+              <div style="font-weight:900; font-size:0.98rem;">
+                ${escapeHtml(p.name)}
+                ${votersForThisPlayer.length > 0 ? `<span class="badge-crown" style="margin-left:4px;">${votersForThisPlayer.length}</span>` : ''}
               </div>
+              <div style="font-size:0.75rem; color:var(--yellow-soft); margin-top:4px;">
+                ${wasRevealedInnocent ? '✅ Inocente revelado' : (myTargetName ? `🗳️ ${escapeHtml(myTargetName)}` : '⏳ Pensando...')}
+              </div>
+              ${votersForThisPlayer.length > 0 ? `
+                <div style="display:flex; flex-wrap:wrap; gap:4px; justify-content:center; margin-top:8px;">
+                  ${votersForThisPlayer.map(v => `
+                    <span class="voter-badge">
+                      ${AVATARS[(v.avatar || 0) % AVATARS.length]} ${escapeHtml(v.name)}
+                    </span>
+                  `).join('')}
+                </div>
+              ` : ''}
             </div>
           `;
         }).join('');
@@ -1096,10 +1154,16 @@
         const passWrap = document.getElementById('passVoteWrap');
         passWrap.classList.toggle('hidden', !canPass);
         if (canPass) {
+          const passVoters = votersByTarget['pass'] || [];
           const btnPass = document.getElementById('btnPassVote');
           btnPass.textContent = st.my_vote === 'pass'
-            ? '✅ HAS ELEGIDO PASAR TURNO'
-            : '⏭ PASAR TURNO (NO ESTOY SEGURO AÚN)';
+            ? `✅ HAS ELEGIDO PASAR TURNO (${passVoters.length})`
+            : `⏭ PASAR TURNO — AÚN NO ESTOY SEGURO (${passVoters.length})`;
+          document.getElementById('passVotersList').innerHTML = passVoters.map(v => `
+            <span class="voter-badge">
+              ${AVATARS[(v.avatar || 0) % AVATARS.length]} ${escapeHtml(v.name)} pasó
+            </span>
+          `).join('');
         }
 
         document.getElementById('hostVoteControls').classList.toggle('hidden', !isHost);

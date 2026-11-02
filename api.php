@@ -488,11 +488,26 @@ switch ($action) {
         if (!$isHost) { echo json_encode(['error' => 'No autorizado']); exit; }
         $db->exec("DELETE FROM used_places");
         break;
+
+    case 'toggle_used_place':
+        if (!$isHost) { echo json_encode(['error' => 'No autorizado']); exit; }
+        $pId = (int)($input['place_id'] ?? 0);
+        $exists = (int)$db->query("SELECT COUNT(*) FROM used_places WHERE place_id = $pId")->fetchColumn();
+        if ($exists > 0) {
+            $db->prepare("DELETE FROM used_places WHERE place_id = ?")->execute([$pId]);
+        } else {
+            $db->prepare("INSERT OR IGNORE INTO used_places (place_id) VALUES (?)")->execute([$pId]);
+        }
+        break;
 }
 
 $players = $db->query("SELECT id, name, avatar, is_host, last_seen, eliminated FROM players ORDER BY rowid ASC")->fetchAll();
 $votesRows = $db->query("SELECT voter_id, target_id FROM votes")->fetchAll();
 $votedIds = array_column($votesRows, 'voter_id');
+$votesMap = [];
+foreach ($votesRows as $vr) {
+    $votesMap[$vr['voter_id']] = $vr['target_id'];
+}
 
 $myVote = null;
 foreach ($votesRows as $vr) {
@@ -524,6 +539,7 @@ $response = [
     'seconds_left' => max(0, (int)$cfg['turn_ends_at'] - $now),
     'players' => $players,
     'voted_player_ids' => $votedIds,
+    'votes_map' => $votesMap,
     'my_vote' => $myVote,
     'majority_threshold' => $threshold,
     'role' => $amISpy ? 'spy' : 'agent',
