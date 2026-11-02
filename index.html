@@ -100,24 +100,24 @@
 
     .bg-blob.b1 {
       width: 190px; height: 190px;
-      top: -75px; left: 8%;
+      top: -85px; left: -65px;
       background: var(--cell-pink);
       border-color: var(--cell-pink-stroke);
       border-width: 7px;
     }
     .bg-blob.b2 {
       width: 160px; height: 160px;
-      bottom: 6%; left: -65px;
+      bottom: 6%; left: -75px;
       background: var(--cell-orange);
       border-color: var(--cell-orange-stroke);
       border-width: 6px;
     }
     .bg-blob.b3 {
-      width: 110px; height: 110px;
-      top: -20px; right: 5%;
+      width: 130px; height: 130px;
+      top: -55px; right: -45px;
       background: var(--cell-green);
       border-color: var(--cell-green-stroke);
-      border-width: 5px;
+      border-width: 6px;
     }
     .bg-blob.b4 {
       width: 240px; height: 240px;
@@ -128,28 +128,28 @@
     }
     .bg-blob.b5 {
       width: 56px; height: 56px;
-      top: 42%; left: 3%;
+      top: 42%; left: -18px;
       background: var(--cell-cyan);
       border-color: var(--cell-cyan-stroke);
       border-width: 4px;
     }
     .bg-blob.b6 {
       width: 48px; height: 48px;
-      top: 32%; right: 4%;
+      top: 32%; right: -14px;
       background: var(--cell-purple);
       border-color: var(--cell-purple-stroke);
       border-width: 4px;
     }
     .bg-blob.b7 {
       width: 44px; height: 44px;
-      bottom: 24%; right: 8%;
+      bottom: 24%; right: 4%;
       background: var(--cell-lime);
       border-color: var(--cell-lime-stroke);
       border-width: 4px;
     }
     .bg-blob.b8 {
-      width: 46px; height: 46px;
-      top: 12%; left: 3%;
+      width: 42px; height: 42px;
+      top: 19%; left: 2%;
       background: var(--cell-blue);
       border-color: var(--cell-blue-stroke);
       border-width: 4px;
@@ -181,18 +181,26 @@
 
     .brand-header {
       text-align: center;
-      margin: 4px auto 18px;
+      margin: 4px auto 16px;
+      background: rgba(255, 255, 255, 0.88);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 2px solid var(--border);
+      padding: 12px 26px 11px;
+      border-radius: 22px;
+      box-shadow: 0 8px 24px rgba(20, 45, 70, 0.07);
+      max-width: 92vw;
     }
 
     .brand-title {
       font-family: 'Ubuntu', sans-serif;
-      font-size: clamp(2.5rem, 7vw, 4rem);
+      font-size: clamp(2.35rem, 7vw, 3.7rem);
       font-weight: 700;
       color: var(--ink);
       letter-spacing: -0.03em;
       line-height: 1;
       display: inline-block;
-      padding: 0 12px 6px;
+      padding: 0 10px 6px;
       border-bottom: 3px solid var(--ink);
     }
 
@@ -202,12 +210,12 @@
 
     .brand-subtitle {
       font-family: 'Ubuntu', sans-serif;
-      font-size: 0.85rem;
+      font-size: clamp(0.72rem, 2.5vw, 0.84rem);
       font-weight: 700;
-      letter-spacing: 0.12em;
+      letter-spacing: 0.11em;
       text-transform: uppercase;
-      color: var(--ink);
-      margin-top: 8px;
+      color: var(--ink-secondary);
+      margin-top: 7px;
     }
 
     /* CONTENEDOR PRINCIPAL */
@@ -446,6 +454,39 @@
       }
       .lobby-grid {
         grid-template-columns: 310px 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      body {
+        padding: 10px 10px 150px;
+      }
+      .frame {
+        padding: 12px;
+        border-radius: 18px;
+      }
+      .panel {
+        padding: 14px;
+      }
+      .bg-blob.b1 {
+        width: 125px; height: 125px;
+        top: -55px; left: -45px;
+      }
+      .bg-blob.b3 {
+        width: 95px; height: 95px;
+        top: -35px; right: -35px;
+      }
+      .bg-blob.b8 {
+        display: none;
+      }
+      .banner-inner {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 6px;
+      }
+      .banner-inner .banner-box:last-child {
+        grid-column: 1 / -1;
+        justify-content: center;
       }
     }
 
@@ -840,10 +881,10 @@
     <div class="bg-blob b6"></div>
     <div class="bg-blob b7"></div>
     <div class="bg-blob b8"></div>
-    <span class="pellet" style="top:8%; left:34%; background:#00c8ff;"></span>
-    <span class="pellet" style="top:15%; left:46%; background:#ff1755;"></span>
-    <span class="pellet" style="top:11%; right:26%; background:#651fff;"></span>
-    <span class="pellet" style="top:22%; right:16%; background:#ff8c00;"></span>
+    <span class="pellet" style="top:6%; left:22%; background:#00c8ff;"></span>
+    <span class="pellet" style="top:18%; left:14%; background:#ff1755;"></span>
+    <span class="pellet" style="top:11%; right:20%; background:#651fff;"></span>
+    <span class="pellet" style="top:24%; right:12%; background:#ff8c00;"></span>
     <span class="pellet" style="top:68%; left:14%; background:#003cff;"></span>
     <span class="pellet" style="top:78%; left:28%; background:#ff1755;"></span>
     <span class="pellet" style="top:84%; right:31%; background:#ffd600;"></span>
