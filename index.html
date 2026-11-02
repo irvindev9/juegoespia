@@ -949,7 +949,7 @@
           <div class="how-item">
             <div class="how-dot" style="background:var(--cell-orange); border:2px solid var(--cell-orange-stroke);">2</div>
             <div style="font-size:0.9rem; line-height:1.4; color:var(--ink-secondary);">
-              <strong style="color:var(--ink);">Preguntas en vivo:</strong> Por turnos con reloj, cada jugador hace una pregunta en voz alta sobre el lugar.
+              <strong style="color:var(--ink);">Afirmaciones en vivo:</strong> Por turnos con reloj, cada jugador dice en voz alta una pista o afirmación sin revelar el lugar (ej. <em>«lugar donde sueles leer»</em>).
             </div>
           </div>
           <div class="how-item">
@@ -1045,7 +1045,7 @@
         <h2 id="currentTurnPlayerName" style="font-family:'Ubuntu',sans-serif; font-size:1.65rem;">Jugador</h2>
       </div>
       <p style="font-size:0.86rem; color:var(--ink-muted); font-weight:700; text-transform:uppercase; letter-spacing:0.05em;">
-        PREGUNTANDO AHORA EN VOZ ALTA
+        DICIENDO SU AFIRMACIÓN EN VOZ ALTA
       </p>
 
       <div id="timerRing" class="timer-cell">
@@ -1386,11 +1386,11 @@
       } else if (st.role === 'spy') {
         secretCard.classList.add('spy-card');
         secretValue.textContent = 'ERES EL ESPÍA';
-        secretHint.textContent = 'Escucha las preguntas de los demás para deducir el lugar sin levantar sospechas.';
+        secretHint.textContent = 'Escucha las afirmaciones de los demás para deducir el lugar y di una pista creíble sin levantar sospechas.';
       } else {
         secretCard.classList.remove('spy-card');
         secretValue.textContent = st.place || '---';
-        secretHint.textContent = 'Lugar secreto de esta partida. Haz tu pregunta sin regalarle pistas obvias al espía.';
+        secretHint.textContent = 'Di una afirmación sobre este lugar sin revelarlo (ej. «lugar donde sueles leer»).';
       }
 
       const pMap = {};
@@ -1433,14 +1433,14 @@
         const myPos = order.indexOf(st.me.id);
         const myTurnEl = document.getElementById('bannerMyTurnStatus');
         if (myPos === idx) {
-          myTurnEl.textContent = '¡Te toca preguntar ahora!';
+          myTurnEl.textContent = '¡Te toca decir tu afirmación!';
           myTurnEl.style.color = 'var(--cell-pink)';
         } else if (myPos > idx) {
           const diff = myPos - idx;
           myTurnEl.textContent = diff === 1 ? '¡Eres el siguiente!' : `En ${diff} turnos (#${myPos + 1})`;
           myTurnEl.style.color = 'var(--ink)';
         } else {
-          myTurnEl.textContent = 'Ya preguntaste';
+          myTurnEl.textContent = 'Ya participaste';
           myTurnEl.style.color = 'var(--cell-green-stroke)';
         }
       }
