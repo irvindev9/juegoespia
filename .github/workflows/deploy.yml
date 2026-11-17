@@ -1,0 +1,27 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          script: |
+            set -e
+            cd ${{ secrets.SSH_PATH || '/var/www/irvin/juegoespia' }}
+            git pull origin main
+            chown -R www-data:www-data /var/www/irvin/juegoespia
+            chmod -R 775 /var/www/irvin/juegoespia
+            echo "✅ Despliegue completado en /var/www/irvin/juegoespia"
