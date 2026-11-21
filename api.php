@@ -6,7 +6,7 @@ $dbFile = __DIR__ . '/game.sqlite';
 $db = new PDO('sqlite:' . $dbFile);
 $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 $db->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
-$db->exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 3000;');
+$db->exec('PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;');
 
 // Inicializar tablas si no existen
 $db->exec("
@@ -35,54 +35,6 @@ CREATE TABLE IF NOT EXISTS votes (
     target_id TEXT NOT NULL
 );
 ");
-try {
-    $db->exec("ALTER TABLE players ADD COLUMN score REAL DEFAULT 0");
-} catch (Exception $e) {}
-
-// Configuración e inicialización por defecto
-$defaults = [
-    'host_user' => 'irvin',
-    'host_pass' => 'admin1.',
-    'max_rounds' => '3',
-    'first_turn_sec' => '20',
-    'turn_sec' => '10',
-    'status' => 'lobby', // lobby | questioning | voting | round_result | game_over
-    'current_round' => '1',
-    'current_place' => '',
-    'spy_id' => '',
-    'turn_order' => '[]',
-    'turn_index' => '0',
-    'turn_ends_at' => '0',
-    'last_event' => ''
-];
-
-$stmt = $db->prepare("INSERT OR IGNORE INTO config (k, v) VALUES (?, ?)");
-foreach ($defaults as $k => $v) {
-    $stmt->execute([$k, $v]);
-}
-
-// Pre-crear el usuario Host (irvin) en la tabla de jugadores
-$db->prepare("
-    INSERT OR IGNORE INTO players (id, name, avatar, is_host, last_seen, eliminated)
-    VALUES ('host_irvin', 'irvin', 0, 1, 0, 0)
-")->execute();
-
-// Semilla inicial de lugares si está vacía
-$countPlaces = (int)$db->query("SELECT COUNT(*) FROM places")->fetchColumn();
-if ($countPlaces === 0) {
-    $initialPlaces = [
-        'Aeropuerto', 'Hospital', 'Playa', 'Casino', 'Supermercado',
-        'Cine', 'Restaurante', 'Escuela', 'Estación de Policía', 'Banco',
-        'Circo', 'Crucero', 'Estación Espacial', 'Submarino', 'Hotel',
-        'Gimnasio', 'Parque de Diversiones', 'Museo', 'Biblioteca', 'Zoológico',
-        'Estadio de Fútbol', 'Teatro', 'Base Militar', 'Taller Mecánico', 'Avión',
-        'Boda', 'Cementerio', 'Discoteca', 'Universidad', 'Granja'
-    ];
-    $ins = $db->prepare("INSERT OR IGNORE INTO places (name) VALUES (?)");
-    foreach ($initialPlaces as $p) {
-        $ins->execute([$p]);
-    }
-}
 
 function getConfig(PDO $db): array {
     $rows = $db->query("SELECT k, v FROM config")->fetchAll();
@@ -98,29 +50,77 @@ function setConfig(PDO $db, array $pairs): void {
     }
 }
 
+$cfg = getConfig($db);
+
+// Solo correr inicialización pesada y migración la primera vez que se crea la BD
+if (!isset($cfg['status'])) {
+    try {
+        $db->exec("ALTER TABLE players ADD COLUMN score REAL DEFAULT 0");
+    } catch (Exception $e) {}
+
+    $defaults = [
+        'host_user' => 'irvin',
+        'host_pass' => 'admin1.',
+        'max_rounds' => '3',
+        'first_turn_sec' => '20',
+        'turn_sec' => '10',
+        'status' => 'lobby', // lobby | questioning | voting | round_result | game_over
+        'current_round' => '1',
+        'current_place' => '',
+        'spy_id' => '',
+        'turn_order' => '[]',
+        'turn_index' => '0',
+        'turn_ends_at' => '0',
+        'last_event' => ''
+    ];
+    $stmt = $db->prepare("INSERT OR IGNORE INTO config (k, v) VALUES (?, ?)");
+    foreach ($defaults as $k => $v) {
+        $stmt->execute([$k, $v]);
+    }
+    $db->prepare("
+        INSERT OR IGNORE INTO players (id, name, avatar, is_host, last_seen, eliminated)
+        VALUES ('host_irvin', 'irvin', 0, 1, 0, 0)
+    ")->execute();
+
+    $countPlaces = (int)$db->query("SELECT COUNT(*) FROM places")->fetchColumn();
+    if ($countPlaces === 0) {
+        $initialPlaces = [
+            'Aeropuerto', 'Hospital', 'Playa', 'Casino', 'Supermercado',
+            'Cine', 'Restaurante', 'Escuela', 'Estación de Policía', 'Banco',
+            'Circo', 'Crucero', 'Estación Espacial', 'Submarino', 'Hotel',
+            'Gimnasio', 'Parque de Diversiones', 'Museo', 'Biblioteca', 'Zoológico',
+            'Estadio de Fútbol', 'Teatro', 'Base Militar', 'Taller Mecánico', 'Avión',
+            'Boda', 'Cementerio', 'Discoteca', 'Universidad', 'Granja'
+        ];
+        $ins = $db->prepare("INSERT OR IGNORE INTO places (name) VALUES (?)");
+        foreach ($initialPlaces as $p) {
+            $ins->execute([$p]);
+        }
+    }
+    $cfg = getConfig($db);
+}
+
 $input = json_decode(file_get_contents('php://input'), true) ?? [];
 $action = $_GET['action'] ?? $input['action'] ?? 'state';
 $playerId = $_GET['player_id'] ?? $input['player_id'] ?? '';
 $now = time();
 
-// Actualizar presencia del jugador
-if ($playerId !== '') {
-    $db->prepare("UPDATE players SET last_seen = ? WHERE id = ?")->execute([$now, $playerId]);
-}
-
-$cfg = getConfig($db);
-
-// Verificar si el jugador actual es host
+// Verificar si el jugador actual existe y es host
 $me = null;
 if ($playerId !== '') {
     $st = $db->prepare("SELECT * FROM players WHERE id = ?");
     $st->execute([$playerId]);
     $me = $st->fetch() ?: null;
+    // Actualizar presencia solo cada >= 3s para evitar bloqueos de escritura en polling concurrente
+    if ($me && ($now - (int)$me['last_seen'] >= 3)) {
+        $db->prepare("UPDATE players SET last_seen = ? WHERE id = ?")->execute([$now, $playerId]);
+        $me['last_seen'] = $now;
+    }
 }
 $isHost = $me && (int)$me['is_host'] === 1;
 
-// Auto-avanzar turnos de preguntas cuando el reloj llega a 0
-if ($cfg['status'] === 'questioning') {
+// Auto-avanzar turnos de preguntas cuando el reloj llega a 0 (excepto si la petición ya es next_turn)
+if ($cfg['status'] === 'questioning' && $action !== 'next_turn') {
     $turnOrder = json_decode($cfg['turn_order'], true) ?: [];
     $turnIndex = (int)$cfg['turn_index'];
     $turnEndsAt = (int)$cfg['turn_ends_at'];
@@ -371,15 +371,22 @@ switch ($action) {
             $existingGuestId = $stCheck->fetchColumn();
             if ($existingGuestId) {
                 $id = $existingGuestId;
-            } elseif ($id === '' || $id === 'host_irvin') {
-                $id = bin2hex(random_bytes(8));
             } else {
-                // Si traía un ID en sesión pero con otro nombre distinto, generar nuevo ID para no sobrescribir al jugador anterior
-                $stOld = $db->prepare("SELECT name FROM players WHERE id = ?");
-                $stOld->execute([$id]);
-                $oldName = $stOld->fetchColumn();
-                if ($oldName !== false && strtolower($oldName) !== strtolower($name)) {
+                // Si la partida ya está en curso, no crear jugadores nuevos fantasmas (evita romper votaciones si alguien se equivoca al escribir su nombre al reconectar)
+                if ($cfg['status'] !== 'lobby') {
+                    echo json_encode(['error' => 'Hay una partida en curso. Escribe exactamente el nombre con el que iniciaste para recuperar tu sesión.']);
+                    exit;
+                }
+                if ($id === '' || $id === 'host_irvin') {
                     $id = bin2hex(random_bytes(8));
+                } else {
+                    // Si traía un ID en sesión pero con otro nombre distinto, generar nuevo ID para no sobrescribir al jugador anterior
+                    $stOld = $db->prepare("SELECT name FROM players WHERE id = ?");
+                    $stOld->execute([$id]);
+                    $oldName = $stOld->fetchColumn();
+                    if ($oldName !== false && strtolower($oldName) !== strtolower($name)) {
+                        $id = bin2hex(random_bytes(8));
+                    }
                 }
             }
         }
@@ -412,12 +419,26 @@ switch ($action) {
 
     case 'start_game':
         if (!$isHost) { echo json_encode(['error' => 'Solo el Host puede iniciar']); exit; }
-        $db->exec("UPDATE players SET eliminated = 0");
         $players = $db->query("SELECT id FROM players ORDER BY rowid ASC")->fetchAll(PDO::FETCH_COLUMN);
         if (count($players) < 3) {
             echo json_encode(['error' => 'Se necesitan al menos 3 jugadores en la sala para empezar']);
             exit;
         }
+        $totalPlaces = (int)$db->query("SELECT COUNT(*) FROM places")->fetchColumn();
+        if ($totalPlaces === 0) {
+            echo json_encode(['error' => 'No hay lugares registrados. Agrega lugares en Ajustes.']);
+            exit;
+        }
+
+        // Bloqueo atómico para evitar doble inicio por doble clic en conexión lenta
+        $lockStart = $db->prepare("UPDATE config SET v = 'starting_game' WHERE k = 'status' AND v IN ('lobby', 'game_over')");
+        $lockStart->execute();
+        if ($lockStart->rowCount() !== 1) {
+            $cfg = getConfig($db);
+            break;
+        }
+
+        $db->exec("UPDATE players SET eliminated = 0");
 
         // Elegir un lugar al azar que no esté en used_places
         $avail = $db->query("
@@ -428,10 +449,6 @@ switch ($action) {
         if (count($avail) === 0) {
             $db->exec("DELETE FROM used_places");
             $avail = $db->query("SELECT id, name FROM places")->fetchAll();
-        }
-        if (count($avail) === 0) {
-            echo json_encode(['error' => 'No hay lugares registrados. Agrega lugares en Ajustes.']);
-            exit;
         }
 
         $picked = $avail[array_rand($avail)];
@@ -457,17 +474,27 @@ switch ($action) {
     case 'next_turn':
         if (!$isHost) { echo json_encode(['error' => 'Solo el Host puede avanzar el turno']); exit; }
         if ($cfg['status'] === 'questioning') {
+            $currentIndex = (int)$cfg['turn_index'];
+            if (isset($input['turn_index']) && (int)$input['turn_index'] !== $currentIndex) {
+                break;
+            }
             $turnOrder = json_decode($cfg['turn_order'], true) ?: [];
-            $nextIndex = (int)$cfg['turn_index'] + 1;
+            $nextIndex = $currentIndex + 1;
+            $claimTurn = $db->prepare("UPDATE config SET v = ? WHERE k = 'turn_index' AND v = ?");
             if ($nextIndex >= count($turnOrder)) {
-                $db->exec("DELETE FROM votes");
-                setConfig($db, ['status' => 'voting', 'turn_index' => '0', 'turn_ends_at' => '0']);
+                $claimTurn->execute(['0', (string)$currentIndex]);
+                if ($claimTurn->rowCount() === 1 || $currentIndex === 0) {
+                    $db->exec("DELETE FROM votes");
+                    setConfig($db, ['status' => 'voting', 'turn_index' => '0', 'turn_ends_at' => '0']);
+                }
             } else {
-                $sec = (int)$cfg['turn_sec'];
-                setConfig($db, [
-                    'turn_index' => (string)$nextIndex,
-                    'turn_ends_at' => (string)($now + $sec)
-                ]);
+                $claimTurn->execute([(string)$nextIndex, (string)$currentIndex]);
+                if ($claimTurn->rowCount() === 1) {
+                    $sec = (int)$cfg['turn_sec'];
+                    setConfig($db, [
+                        'turn_ends_at' => (string)($now + $sec)
+                    ]);
+                }
             }
             $cfg = getConfig($db);
         }
@@ -516,8 +543,12 @@ switch ($action) {
 
     case 'next_round':
         if (!$isHost) { echo json_encode(['error' => 'No autorizado']); exit; }
-        $nextRound = (int)$cfg['current_round'] + 1;
-        startQuestionRound($db, $nextRound, $cfg);
+        $lockRound = $db->prepare("UPDATE config SET v = 'starting_round' WHERE k = 'status' AND v = 'round_result'");
+        $lockRound->execute();
+        if ($lockRound->rowCount() === 1) {
+            $nextRound = (int)$cfg['current_round'] + 1;
+            startQuestionRound($db, $nextRound, $cfg);
+        }
         $cfg = getConfig($db);
         break;
 

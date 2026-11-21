@@ -18,11 +18,24 @@ const CELLS = [
   { bg: '#f50057', border: '#ab003c', svg: '<path d="M2 12h4l3-9 6 18 3-9h4"/>' }
 ];
 
-let avatarIdx = Math.floor(Math.random() * CELLS.length);
+const safeStorage = {
+  get(store, k) { try { return store ? store.getItem(k) : null; } catch (e) { return null; } },
+  set(store, k, v) { try { if (store) store.setItem(k, v); } catch (e) {} },
+  remove(store, k) { try { if (store) store.removeItem(k); } catch (e) {} }
+};
+const locStore = typeof localStorage !== 'undefined' ? localStorage : null;
+
+const savedAvatar = safeStorage.get(sessionStorage, 'espia_avatar_idx') ?? safeStorage.get(locStore, 'espia_avatar_idx');
+let avatarIdx = savedAvatar !== null ? (Math.abs(Number(savedAvatar)) % CELLS.length) : Math.floor(Math.random() * CELLS.length);
 let loginAsHost = false;
-let playerId = sessionStorage.getItem('espia_player_id') || '';
-let tvMode = sessionStorage.getItem('espia_tv_mode') === '1';
+let playerId = safeStorage.get(sessionStorage, 'espia_player_id') || '';
+let tvMode = safeStorage.get(sessionStorage, 'espia_tv_mode') === '1';
 let lastState = null;
+let stateSeq = 0;
+let pollController = null;
+let pollInFlight = false;
+let consecutiveNetErrors = 0;
+let localTurnDeadlineMs = 0;
 
 function getCell(idx) {
   return CELLS[Math.abs(Number(idx) || 0) % CELLS.length];
@@ -41,7 +54,7 @@ function renderCellHtml(idx, extraClass = 'mini-cell') {
 }
 
 applyCellToElement(document.getElementById('avatarPreview'), avatarIdx);
-const savedName = sessionStorage.getItem('espia_player_name') || '';
+const savedName = safeStorage.get(sessionStorage, 'espia_player_name') || safeStorage.get(locStore, 'espia_player_name') || '';
 if (savedName) document.getElementById('inputName').value = savedName;
 
 function showToast(msg) {
@@ -54,6 +67,8 @@ function showToast(msg) {
 
 function nextAvatar() {
   avatarIdx = (avatarIdx + 1) % CELLS.length;
+  safeStorage.set(sessionStorage, 'espia_avatar_idx', String(avatarIdx));
+  safeStorage.set(locStore, 'espia_avatar_idx', String(avatarIdx));
   applyCellToElement(document.getElementById('avatarPreview'), avatarIdx);
 }
 
@@ -68,15 +83,16 @@ function switchLoginTab(isHost) {
 
 function toggleTvMode() {
   tvMode = !tvMode;
-  sessionStorage.setItem('espia_tv_mode', tvMode ? '1' : '0');
+  safeStorage.set(sessionStorage, 'espia_tv_mode', tvMode ? '1' : '0');
   if (lastState) renderState(lastState);
 }
 
 function logoutPlayer() {
-  sessionStorage.removeItem('espia_player_id');
-  sessionStorage.removeItem('espia_player_name');
+  safeStorage.remove(sessionStorage, 'espia_player_id');
+  safeStorage.remove(sessionStorage, 'espia_player_name');
   playerId = '';
   lastState = null;
+  localTurnDeadlineMs = 0;
   document.getElementById('topBar').classList.add('hidden');
   document.getElementById('viewLobby').classList.add('hidden');
   document.getElementById('viewGame').classList.add('hidden');
@@ -84,24 +100,56 @@ function logoutPlayer() {
   document.getElementById('viewLogin').classList.remove('hidden');
 }
 
-async function apiCall(action, payload = {}) {
+async function fetchWithTimeout(url, options = {}, timeoutMs = 7000, externalController = null) {
+  const controller = externalController || (typeof AbortController !== 'undefined' ? new AbortController() : null);
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const res = await fetch(`api.php?action=${encodeURIComponent(action)}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...payload, action, player_id: playerId })
-    });
-    const data = await res.json();
-    if (data.error) {
-      showToast(data.error);
+    return await fetch(url, controller ? { ...options, signal: controller.signal } : options);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function apiCall(action, payload = {}) {
+  // Invalidar cualquier poll en vuelo para que una respuesta vieja y lenta no pise esta acción
+  stateSeq++;
+  const mySeq = stateSeq;
+  if (pollController) {
+    try { pollController.abort(); } catch (e) {}
+    pollController = null;
+  }
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await fetchWithTimeout(`api.php?action=${encodeURIComponent(action)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...payload, action, player_id: playerId })
+      }, 8000);
+      const data = await res.json();
+      if (consecutiveNetErrors > 0) {
+        consecutiveNetErrors = 0;
+        showToast('Conexión recuperada');
+      }
+      if (data.error) {
+        showToast(data.error);
+        return null;
+      }
+      if (mySeq >= stateSeq) {
+        renderState(data);
+      }
+      return data;
+    } catch (e) {
+      if (attempt === 0) {
+        await new Promise(r => setTimeout(r, 600));
+        continue;
+      }
+      consecutiveNetErrors++;
+      showToast('Conexión lenta o inestable. Reintentando...');
       return null;
     }
-    renderState(data);
-    return data;
-  } catch (e) {
-    console.error(e);
-    return null;
   }
+  return null;
 }
 
 async function joinGame() {
@@ -118,13 +166,18 @@ async function joinGame() {
 
   if (data && data.me) {
     playerId = data.me.id;
-    sessionStorage.setItem('espia_player_id', playerId);
-    sessionStorage.setItem('espia_player_name', name);
+    safeStorage.set(sessionStorage, 'espia_player_id', playerId);
+    safeStorage.set(sessionStorage, 'espia_player_name', name);
+    safeStorage.set(locStore, 'espia_player_name', name);
+    safeStorage.set(locStore, 'espia_avatar_idx', String(avatarIdx));
     renderState(data);
   }
 }
 
 async function hostAction(action, extra = {}) {
+  if (action === 'next_turn' && lastState && typeof lastState.turn_index === 'number') {
+    extra = { turn_index: lastState.turn_index, ...extra };
+  }
   await apiCall(action, extra);
 }
 
@@ -285,6 +338,7 @@ function renderState(st) {
     document.getElementById('currentTurnPlayerName').textContent = currP.name;
 
     const secLeft = st.seconds_left ?? 0;
+    localTurnDeadlineMs = Date.now() + (secLeft * 1000);
     document.getElementById('timerNum').textContent = secLeft;
     document.getElementById('timerRing').classList.toggle('urgent', secLeft <= 4);
     document.getElementById('hostTurnControls').classList.toggle('hidden', !isHost);
@@ -489,13 +543,60 @@ function escapeHtml(str) {
   }[s]));
 }
 
-async function pollState() {
+async function pollState(force = false) {
+  if (pollInFlight && !force) return;
+  if (force && pollController) {
+    try { pollController.abort(); } catch (e) {}
+  }
+  pollInFlight = true;
+  const mySeq = stateSeq;
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  pollController = controller;
   try {
-    const res = await fetch(`api.php?action=state&player_id=${encodeURIComponent(playerId)}`);
+    const res = await fetchWithTimeout(
+      `api.php?action=state&player_id=${encodeURIComponent(playerId)}`,
+      {},
+      5500,
+      controller
+    );
     const data = await res.json();
+    if (mySeq !== stateSeq) return; // Ignorar respuesta si hubo una acción más reciente en medio
+    if (consecutiveNetErrors > 0) {
+      consecutiveNetErrors = 0;
+      showToast('Conexión recuperada');
+    }
     if (!data.error) renderState(data);
-  } catch (e) {}
+  } catch (e) {
+    if (e && e.name === 'AbortError' && mySeq !== stateSeq) return;
+    consecutiveNetErrors++;
+    if (consecutiveNetErrors === 2 && playerId) {
+      showToast('Conexión lenta o caída, reconectando...');
+    }
+  } finally {
+    if (pollController === controller) {
+      pollController = null;
+      pollInFlight = false;
+    }
+  }
 }
 
-setInterval(pollState, 1500);
-pollState();
+// Interpolación local del reloj cada 500ms para que no se congele visualmente durante microcortes de red
+setInterval(() => {
+  if (lastState && lastState.status === 'questioning' && localTurnDeadlineMs > 0) {
+    const secLeft = Math.max(0, Math.ceil((localTurnDeadlineMs - Date.now()) / 1000));
+    document.getElementById('timerNum').textContent = secLeft;
+    document.getElementById('timerRing').classList.toggle('urgent', secLeft <= 4);
+  }
+}, 500);
+
+if (typeof window !== 'undefined' && window.addEventListener) {
+  window.addEventListener('online', () => pollState(true));
+}
+if (typeof document !== 'undefined' && document.addEventListener) {
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) pollState(true);
+  });
+}
+
+setInterval(() => pollState(false), 1500);
+pollState(true);
